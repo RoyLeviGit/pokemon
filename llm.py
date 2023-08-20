@@ -27,6 +27,9 @@ class BaseLLM:
         while True:
             # Generate a completion based on the given prompt
             generation = self.generate(prompt, temperature, max_tokens)
+            print(
+                f"Output generated in {generation.time:.2f} seconds ({generation.completion_tokens / generation.time:.2f} tokens/s, {generation.completion_tokens} tokens)"
+            )
 
             try:
                 # Try to convert the completion into a DataFrame
