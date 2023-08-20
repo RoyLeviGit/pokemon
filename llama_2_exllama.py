@@ -1,27 +1,60 @@
+import glob
+import os
 import time
-from pathlib import Path
 
 from exllama.generator import ExLlamaGenerator
 from exllama.model import ExLlama, ExLlamaCache, ExLlamaConfig
 from exllama.tokenizer import ExLlamaTokenizer
 
-path_to_model = Path(
-    "C:/Users/Roy/.cache/huggingface/hub/models--TheBloke--Llama-2-7B-GPTQ/snapshots/98ffa0d89723ce1e3214f477469b2db67c6c4586"
-)
-tokenizer_model_path = path_to_model / "tokenizer.model"
-model_config_path = path_to_model / "config.json"
-model_path = path_to_model / "gptq_model-4bit-128g.safetensors"
+from llm import Generation, BaseLLM
 
-config = ExLlamaConfig(str(model_config_path))
-config.model_path = str(model_path)
 
-model = ExLlama(config)
-tokenizer = ExLlamaTokenizer(str(tokenizer_model_path))
-cache = ExLlamaCache(model)
-generator = ExLlamaGenerator(model, tokenizer, cache)
+class Llama2ExLlama(BaseLLM):
+    def __init__(
+        self,
+        model_directory="C:/Users/Roy/.cache/huggingface/hub/models--TheBloke--Llama-2-7b-Chat-GPTQ/snapshots/831af5b22d7f2eed9c37ca851675a2887cfeb399",
+    ):
+        tokenizer_path = os.path.join(model_directory, "tokenizer.model")
+        model_config_path = os.path.join(model_directory, "config.json")
+        st_pattern = os.path.join(model_directory, "*.safetensors")
+        model_path = glob.glob(st_pattern)[0]
 
-t0 = time.time()
+        # Create config, model, tokenizer and generator
 
-t1 = time.time()
+        config = ExLlamaConfig(model_config_path)  # create config from config.json
+        config.model_path = model_path  # supply path to model weights file
 
-# print(f'Output generated in {(t1-t0):.2f} seconds ({new_tokens/(t1-t0):.2f} tokens/s, {new_tokens} tokens)')
+        model = ExLlama(config)  # create ExLlama instance and load the weights
+        tokenizer = ExLlamaTokenizer(tokenizer_path)  # create tokenizer from tokenizer model file
+
+        cache = ExLlamaCache(model)  # create cache for inference
+        self.generator = ExLlamaGenerator(model, tokenizer, cache)  # create generator
+
+        # Configure generator
+
+        self.generator.disallow_tokens([tokenizer.eos_token_id])
+
+        self.generator.settings.token_repetition_penalty_max = 1.2
+        self.generator.settings.temperature = 0.95
+        self.generator.settings.top_p = 0.65
+        self.generator.settings.top_k = 100
+        self.generator.settings.typical = 0.5
+
+    def generate(self, prompt, temperature, max_tokens):
+        system_message = "You are a helpful assistant."
+        prompt_template = f'''[INST] <<SYS>>
+        {system_message}
+        <</SYS>>
+
+        {prompt} [/INST]'''
+
+        self.generator.settings.temperature = temperature
+        t0 = time.time()
+        output = self.generator.generate_simple(prompt_template, max_new_tokens=max_tokens)
+        t1 = time.time()
+
+        return Generation(
+            completion=output[len(prompt_template):],
+            time=t1 - t0,
+            completion_tokens=self.generator.gen_num_tokens(),
+        )
