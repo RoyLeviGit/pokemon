@@ -12,8 +12,11 @@ from llm import Generation, BaseLLM
 class Llama2ExLlama(BaseLLM):
     def __init__(
         self,
+        model="llama-2",
         model_directory="C:/Users/Roy/.cache/huggingface/hub/models--TheBloke--Llama-2-7b-Chat-GPTQ/snapshots/831af5b22d7f2eed9c37ca851675a2887cfeb399",
     ):
+        super().__init__(model)
+
         tokenizer_path = os.path.join(model_directory, "tokenizer.model")
         model_config_path = os.path.join(model_directory, "config.json")
         st_pattern = os.path.join(model_directory, "*.safetensors")
@@ -25,7 +28,9 @@ class Llama2ExLlama(BaseLLM):
         config.model_path = model_path  # supply path to model weights file
 
         model = ExLlama(config)  # create ExLlama instance and load the weights
-        tokenizer = ExLlamaTokenizer(tokenizer_path)  # create tokenizer from tokenizer model file
+        tokenizer = ExLlamaTokenizer(
+            tokenizer_path
+        )  # create tokenizer from tokenizer model file
 
         cache = ExLlamaCache(model)  # create cache for inference
         self.generator = ExLlamaGenerator(model, tokenizer, cache)  # create generator
@@ -40,21 +45,15 @@ class Llama2ExLlama(BaseLLM):
         self.generator.settings.top_k = 100
         self.generator.settings.typical = 0.5
 
-    def generate(self, prompt, temperature, max_tokens):
-        system_message = "You are a helpful assistant."
-        prompt_template = f'''[INST] <<SYS>>
-        {system_message}
-        <</SYS>>
-
-        {prompt} [/INST]'''
-
+    def generate(self, messages, temperature, max_tokens):
         self.generator.settings.temperature = temperature
         t0 = time.time()
-        output = self.generator.generate_simple(prompt_template, max_new_tokens=max_tokens)
+        output = self.generator.generate_simple(messages, max_new_tokens=max_tokens)
         t1 = time.time()
 
         return Generation(
-            completion=output[len(prompt_template):],
+            messages=messages,
+            completion=output[len(messages) :],
             time=t1 - t0,
             completion_tokens=self.generator.gen_num_tokens(),
         )
