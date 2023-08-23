@@ -55,7 +55,9 @@ class BaseLLM:
 
             try:
                 # Try to convert the completion into a DataFrame
-                df = table_string_to_dataframe(full_assistant_message)
+                df = table_string_to_dataframe(
+                    full_assistant_message, rows=len(user_message.split(","))
+                )
 
                 # If successful, return the DataFrame
                 return df
