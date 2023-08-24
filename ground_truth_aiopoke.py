@@ -1,3 +1,4 @@
+import asyncio
 import re
 from typing import List, Tuple
 
@@ -7,7 +8,7 @@ import aiohttp
 from sentence_transformers import SentenceTransformer, util
 
 from llm import BaseLLM
-from prompt import POKEMON_COLUMNS
+from prompt import POKEMON_COLUMNS, table_string_to_dataframe
 
 
 class PokemonGroundTruth:

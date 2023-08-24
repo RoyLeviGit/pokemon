@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import os
 import asyncio
@@ -9,40 +10,47 @@ from prompt import dataframe_to_table_string, random_chunk_generator
 
 
 class PokemonEvaluator:
-    def __init__(self, max_chunk_size, save_path):
-        self.max_chunk_size = max_chunk_size
-        self.save_path = save_path
-        if not os.path.exists(self.save_path):
+    @staticmethod
+    def _load_processed(model_name, save_path):
+        if not os.path.exists(save_path):
             # Initialize the CSV file if it doesn't exist
             df = pd.DataFrame(
                 columns=[
                     "Input",
-                    "Ground truth",
-                    "GPT4OpenAI",
-                    "Llama2ExLlama",
-                    "GPT4OpenAI score",
-                    "Llama2ExLlama score",
+                    model_name,
+                    f"{model_name} score",
+                    f"{model_name} yn score",
                 ]
             )
-            df.to_csv(self.save_path, index=False)
+            df.to_csv(save_path, index=False)
 
-    def _load_processed(self):
         # Load processed data
-        return pd.read_csv(self.save_path)["Input"].tolist()
+        return pd.read_csv(save_path)["Input"].tolist()
 
-    def _save_chunk_results(self, results):
+    @staticmethod
+    def _save_chunk_results(results, save_path):
         # Save intermediate results
-        df = pd.read_csv(self.save_path)
+        df = pd.read_csv(save_path)
         df = pd.concat([df, pd.DataFrame(results)], ignore_index=True)
-        df.to_csv(self.save_path, index=False)
+        df.to_csv(save_path, index=False)
 
-    async def evaluate(self, pokemon_list):
-        llms = [Llama2ExLlama(), GPT4OpenAI()]
+    async def evaluate(self, chunks, llm):
+        save_path = "data/results_" + llm.__class__.__name__ + ".csv"
         ground_truth_evaluator = PokemonGroundTruth()
 
-        processed = self._load_processed()
+        processed = self._load_processed(
+            model_name=llm.__class__.__name__, save_path=save_path
+        )
 
-        for chunk in random_chunk_generator(pokemon_list, self.max_chunk_size):
+        num_of_shards = len([shard for chunk in chunks for shard in chunk])
+        remaining_shards = num_of_shards
+
+        for chunk in chunks:
+            print(
+                f"Progress({num_of_shards - remaining_shards}/{num_of_shards}):{(num_of_shards - remaining_shards) / num_of_shards}"
+            )
+            remaining_shards -= len(chunk)
+
             input_str = ", ".join([shard.capitalize() for shard in chunk])
             if input_str in processed:
                 # Skip if already processed
@@ -50,25 +58,17 @@ class PokemonEvaluator:
 
             results = {"Input": input_str}
 
-            skip_chunk = False
-            for llm in llms:
-                try:
-                    df = llm.get_table_from_generator(input_str)
-                    results[f"{llm.__class__.__name__}"] = dataframe_to_table_string(df)
-                    results[
-                        f"{llm.__class__.__name__} score"
-                    ] = await ground_truth_evaluator.score(df)
-                except ValueError:
-                    print(f'Skipping chunk for input: "{input_str}"')
-                    skip_chunk = True
-                    break
+            try:
+                df = llm.get_table_from_generator(input_str)
+                results[f"{llm.__class__.__name__}"] = dataframe_to_table_string(df)
+                score, yn_score = await ground_truth_evaluator.score(df)
+                results[f"{llm.__class__.__name__} score"] = score
+                results[f"{llm.__class__.__name__} yn score"] = yn_score
+            except:
+                print(f'Skipping chunk: "{chunk}"')
+                continue
 
-            if not skip_chunk:
-                # Fetch ground truth data
-                ground_df = await ground_truth_evaluator.fetch_pokemon_data(chunk)
-                results["Ground truth"] = dataframe_to_table_string(ground_df)
+            # Save results for this chunk
+            self._save_chunk_results([results], save_path)
 
-                # Save results for this chunk
-                self._save_chunk_results([results])
-
-        return pd.read_csv(self.save_path)
+        return pd.read_csv(save_path)

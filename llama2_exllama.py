@@ -13,7 +13,7 @@ class Llama2ExLlama(BaseLLM):
     def __init__(
         self,
         model="llama-2",
-        model_directory="C:/Users/Roy/.cache/huggingface/hub/models--TheBloke--Llama-2-7b-Chat-GPTQ/snapshots/831af5b22d7f2eed9c37ca851675a2887cfeb399",
+        model_directory="../Llama-2-7b-Chat-GPTQ",
     ):
         super().__init__(model)
 

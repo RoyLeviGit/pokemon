@@ -85,7 +85,7 @@ def table_string_to_dataframe(s: str, rows: int = None) -> pd.DataFrame:
         if "|" in line and "---" not in line and ":-:" not in line
     ]
     if rows:
-        table_lines = table_lines[:rows]
+        table_lines = table_lines[: rows + 1]
 
     # Extract the headers and data separately
     headers = [cell.strip() for cell in table_lines[0].strip("|").split("|")]
@@ -123,20 +123,22 @@ def dataframe_to_table_string(df: pd.DataFrame) -> str:
     return table_str
 
 
-def random_chunk_generator(data, max_chunk_size):
+def random_chunk_generator(data, max_chunk_size, print_prog=False):
     """
     Generate chunks of data from random indices with sizes up to a maximum chunk size.
 
     :param data: The list to chunk.
     :param max_chunk_size: The maximum size of any chunk.
+    :param print_prog: Print progress. Defaults to False
     :return: A generator yielding chunks of the data from random indices.
     """
 
     remaining_indices = list(range(len(data)))
     while remaining_indices:
-        print(
-            f"Progress({len(data) - len(remaining_indices)}/{len(data)}):{(len(data) - len(remaining_indices)) / len(data)}"
-        )
+        if print_prog:
+            print(
+                f"Progress({len(data) - len(remaining_indices)}/{len(data)}):{(len(data) - len(remaining_indices)) / len(data)}"
+            )
         chunk_size = min(random.randint(1, max_chunk_size), len(remaining_indices))
         selected_indices = random.sample(remaining_indices, chunk_size)
         yield [data[i] for i in selected_indices]
