@@ -34,7 +34,7 @@ class FineTuner:
         print(f"Data saved to {self.save_path}")
 
     def format_csv_for_train(self):
-        with open(self.save_path, encoding='utf8') as data_file:
+        with open(self.save_path, encoding="utf8") as data_file:
             data = pd.read_csv(data_file)
 
         train_data = pd.DataFrame()

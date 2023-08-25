@@ -1,11 +1,7 @@
-import numpy as np
 import pandas as pd
 import os
-import asyncio
 
-from gpt4_openai import GPT4OpenAI
 from ground_truth_aiopoke import PokemonGroundTruth
-from llama2_exllama import Llama2ExLlama
 from prompt import dataframe_to_table_string, random_chunk_generator
 
 
@@ -35,7 +31,7 @@ class PokemonEvaluator:
         df.to_csv(save_path, index=False)
 
     async def evaluate(self, chunks, llm):
-        save_path = "data/results_" + llm.__class__.__name__ + ".csv"
+        save_path = "data/results_train_" + llm.__class__.__name__ + ".csv"
         ground_truth_evaluator = PokemonGroundTruth()
 
         processed = self._load_processed(
