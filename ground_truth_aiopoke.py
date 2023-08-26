@@ -1,5 +1,5 @@
-import asyncio
-import re
+import json
+import random
 from typing import List, Tuple
 
 import pandas as pd
@@ -7,18 +7,66 @@ import aiopoke
 import aiohttp
 from sentence_transformers import SentenceTransformer, util
 
-from llm import BaseLLM
-from prompt import POKEMON_COLUMNS, table_string_to_dataframe
+from prompt import POKEMON_COLUMNS, dataframe_to_table_string
 
 
 class PokemonGroundTruth:
     def __init__(self):
+        self.similarity_model = None
+
+    def _load_similarity_model(self):
         self.similarity_model = SentenceTransformer(
             "sentence-transformers/all-MiniLM-L6-v2"
         )
 
+    def _unload_similarity_model(self):
+        self.similarity_model = None
+
     @staticmethod
-    async def fetch_pokemon_data(pokemon_list: List[str], summarizer: BaseLLM = None):
+    def random_chunk_generator(data, max_chunk_size):
+        """
+        Generate chunks of data from random indices with sizes up to a maximum chunk size.
+
+        :param data: The list to chunk.
+        :param max_chunk_size: The maximum size of any chunk.
+        :return: A generator yielding chunks of the data from random indices.
+        """
+
+        remaining_indices = list(range(len(data)))
+        while remaining_indices:
+            chunk_size = min(random.randint(1, max_chunk_size), len(remaining_indices))
+            selected_indices = random.sample(remaining_indices, chunk_size)
+            yield [data[i] for i in selected_indices]
+
+            # Removing the selected indices from the remaining indices list
+            for i in selected_indices:
+                remaining_indices.remove(i)
+
+    async def generate_data(self, pokemon_names_path, max_pokemons=None):
+        data = {"Input": [], "Output": []}
+
+        # all_pokemon_list contains all 947 Pokémon names
+        with open(pokemon_names_path) as pokemons_file:
+            all_pokemon_list = json.load(pokemons_file)
+        # max number of Pokémon the models should fill data for at each single call
+        max_chunk_size = 4
+
+        if max_pokemons:
+            all_pokemon_list = all_pokemon_list[:max_pokemons]
+
+        for chunk in self.random_chunk_generator(all_pokemon_list, max_chunk_size):
+            input_str = ", ".join([shard.capitalize() for shard in chunk])
+            data["Input"].append(input_str)
+
+            ground_df = await self.fetch_pokemon_data(chunk)
+            data["Output"].append(dataframe_to_table_string(ground_df))
+
+            print(f"Appended Pokemon chuck: {chunk}")
+
+        return pd.DataFrame(data)
+
+    @staticmethod
+    async def fetch_pokemon_data(pokemon_list: List[str]):
         async with aiohttp.ClientSession() as session:
             client = aiopoke.AiopokeClient(session=session)
 
@@ -66,9 +114,6 @@ class PokemonGroundTruth:
                 )
                 description = " ".join(flavor_texts)
 
-                if summarizer:
-                    description = summarizer.get_summary_from_generator(description)
-
                 rows.append(
                     [
                         name,
@@ -91,6 +136,52 @@ class PokemonGroundTruth:
             columns=POKEMON_COLUMNS,
         )
 
+    @staticmethod
+    def compute_type_score(gt_types: set, model_types: set) -> float:
+        intersection = gt_types.intersection(model_types)
+        union = gt_types.union(model_types)
+
+        jaccard_similarity = len(intersection) / len(union)
+        return jaccard_similarity
+
+    @staticmethod
+    def weighted_score(
+        name_accuracy,
+        type_accuracy,
+        hp_mae,
+        attack_mae,
+        defense_mae,
+        special_attack_mae,
+        special_defense_mae,
+        speed_mae,
+        evolution_accuracy,
+        description_similarity,
+    ):
+        # Combine scores
+        w_name = 0.1
+        w_type = 0.1
+        w_hp = 0.1
+        w_attack = 0.1
+        w_defense = 0.1
+        w_special_attack = 0.1
+        w_special_defense = 0.1
+        w_speed = 0.1
+        w_evolution = 0.1
+        w_description = 0.1
+
+        return (
+            w_name * name_accuracy
+            + w_type * type_accuracy
+            + w_hp * (1 - hp_mae / 100)
+            + w_attack * (1 - attack_mae / 100)
+            + w_defense * (1 - defense_mae / 100)
+            + w_special_attack * (1 - special_attack_mae / 100)
+            + w_special_defense * (1 - special_defense_mae / 100)
+            + w_speed * (1 - speed_mae / 100)
+            + w_evolution * evolution_accuracy
+            + w_description * description_similarity
+        )
+
     async def score(self, model_df: pd.DataFrame) -> Tuple[float, float]:
         pokemon_list = list(model_df["Pokémon"])
         ground_truth = await self.fetch_pokemon_data(pokemon_list)
@@ -100,14 +191,6 @@ class PokemonGroundTruth:
             ground_truth
         )
 
-        # Type comparison
-        def compute_type_score(gt_types: set, model_types: set) -> float:
-            intersection = gt_types.intersection(model_types)
-            union = gt_types.union(model_types)
-
-            jaccard_similarity = len(intersection) / len(union)
-            return jaccard_similarity
-
         # Compute type scores for all Pokémon
         type_scores = []
         for gt_type, model_type in zip(
@@ -115,7 +198,7 @@ class PokemonGroundTruth:
         ):
             gt_type_set = set([t.strip().capitalize() for t in gt_type])
             model_type_set = set([t.strip().capitalize() for t in model_type])
-            type_scores.append(compute_type_score(gt_type_set, model_type_set))
+            type_scores.append(self.compute_type_score(gt_type_set, model_type_set))
 
         type_accuracy = sum(type_scores) / len(ground_truth)
 
@@ -138,6 +221,9 @@ class PokemonGroundTruth:
             ground_truth["Evolution"] == model_df["Evolution"].replace("-", "None")
         ) / len(ground_truth)
 
+        if not self.similarity_model:
+            self._load_similarity_model()
+
         # Compute embeddings
         embeddings_ground_truth = self.similarity_model.encode(
             ground_truth["Description"].tolist(), convert_to_tensor=True
@@ -151,29 +237,17 @@ class PokemonGroundTruth:
             util.cos_sim(embeddings_ground_truth, embeddings_generated).diag().mean()
         )
 
-        # Combine scores
-        w_name = 0.1
-        w_type = 0.1
-        w_hp = 0.1
-        w_attack = 0.1
-        w_defense = 0.1
-        w_special_attack = 0.1
-        w_special_defense = 0.1
-        w_speed = 0.1
-        w_evolution = 0.1
-        w_description = 0.1
-
-        total_score = (
-            w_name * name_accuracy
-            + w_type * type_accuracy
-            + w_hp * (1 - hp_mae / 100)
-            + w_attack * (1 - attack_mae / 100)
-            + w_defense * (1 - defense_mae / 100)
-            + w_special_attack * (1 - special_attack_mae / 100)
-            + w_special_defense * (1 - special_defense_mae / 100)
-            + w_speed * (1 - speed_mae / 100)
-            + w_evolution * evolution_accuracy
-            + w_description * description_similarity
+        total_score = self.weighted_score(
+            name_accuracy=name_accuracy,
+            type_accuracy=type_accuracy,
+            hp_mae=hp_mae,
+            attack_mae=attack_mae,
+            defense_mae=defense_mae,
+            special_attack_mae=special_attack_mae,
+            special_defense_mae=special_defense_mae,
+            speed_mae=speed_mae,
+            evolution_accuracy=evolution_accuracy,
+            description_similarity=description_similarity,
         )
 
         # Yes / No scoring system
@@ -187,17 +261,17 @@ class PokemonGroundTruth:
         speed_mae = (1 - (speed_mae == 0)) * 100
         evolution_accuracy = evolution_accuracy == 1
 
-        total_yn_score = (
-            w_name * name_accuracy
-            + w_type * type_accuracy
-            + w_hp * (1 - hp_mae / 100)
-            + w_attack * (1 - attack_mae / 100)
-            + w_defense * (1 - defense_mae / 100)
-            + w_special_attack * (1 - special_attack_mae / 100)
-            + w_special_defense * (1 - special_defense_mae / 100)
-            + w_speed * (1 - speed_mae / 100)
-            + w_evolution * evolution_accuracy
-            + w_description * description_similarity
+        total_yn_score = self.weighted_score(
+            name_accuracy=name_accuracy,
+            type_accuracy=type_accuracy,
+            hp_mae=hp_mae,
+            attack_mae=attack_mae,
+            defense_mae=defense_mae,
+            special_attack_mae=special_attack_mae,
+            special_defense_mae=special_defense_mae,
+            speed_mae=speed_mae,
+            evolution_accuracy=evolution_accuracy,
+            description_similarity=description_similarity,
         )
 
         return float(total_score), float(total_yn_score)

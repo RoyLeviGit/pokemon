@@ -1,4 +1,3 @@
-import random
 from typing import Union, List, Dict
 
 import pandas as pd
@@ -55,12 +54,12 @@ def messages_for_model(
     """
 
     model_templates = {
-        "gpt-4": [
+        "gpt": [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": assistant_message},
         ],
-        "llama-2": LLAMA2_PROMPT_TEMPLATE.format(
+        "llama": LLAMA2_PROMPT_TEMPLATE.format(
             system_message=system_message,
             user_message=user_message,
             assistant_message=assistant_message,
@@ -68,10 +67,11 @@ def messages_for_model(
         "ground_truth": [p.strip() for p in user_message.split(",")],
     }
 
-    try:
-        return model_templates[model]
-    except KeyError:
-        raise NotImplementedError(f"Model '{model}' not supported.")
+    for model_template_key in model_templates.keys():
+        if model_template_key in model:
+            return model_templates[model_template_key]
+
+    raise NotImplementedError(f"Model '{model}' not supported.")
 
 
 def table_string_to_dataframe(s: str, rows: int = None) -> pd.DataFrame:
@@ -121,28 +121,3 @@ def dataframe_to_table_string(df: pd.DataFrame) -> str:
     )
 
     return table_str
-
-
-def random_chunk_generator(data, max_chunk_size, print_prog=False):
-    """
-    Generate chunks of data from random indices with sizes up to a maximum chunk size.
-
-    :param data: The list to chunk.
-    :param max_chunk_size: The maximum size of any chunk.
-    :param print_prog: Print progress. Defaults to False
-    :return: A generator yielding chunks of the data from random indices.
-    """
-
-    remaining_indices = list(range(len(data)))
-    while remaining_indices:
-        if print_prog:
-            print(
-                f"Progress({len(data) - len(remaining_indices)}/{len(data)}):{(len(data) - len(remaining_indices)) / len(data)}"
-            )
-        chunk_size = min(random.randint(1, max_chunk_size), len(remaining_indices))
-        selected_indices = random.sample(remaining_indices, chunk_size)
-        yield [data[i] for i in selected_indices]
-
-        # Removing the selected indices from the remaining indices list
-        for i in selected_indices:
-            remaining_indices.remove(i)

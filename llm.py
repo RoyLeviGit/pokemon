@@ -17,8 +17,8 @@ class Generation(BaseModel):
 
 
 class BaseLLM:
-    def __init__(self, model: str):
-        self.model = model
+    def __init__(self, model_name: str):
+        self.model_name = model_name
 
     def generate(self, prompt: str, temperature: float, max_tokens: int) -> Generation:
         raise NotImplementedError
@@ -26,11 +26,11 @@ class BaseLLM:
     def get_table_from_generator(
         self,
         user_message: str,
-        temperature: float = 0.7,
+        temperature: float = 0.1,
         max_tokens: int = 512,
     ):
         messages = messages_for_model(
-            model=self.model,
+            model=self.model_name,
             system_message=POKEMON_SYSTEM_MESSAGE,
             user_message=user_message,
             assistant_message=POKEMON_ASSISTANT_MESSAGE,
